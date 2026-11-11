@@ -4,12 +4,20 @@
 
 ## 使用方法
 
-1. 从 Release 下载 `ACZeroMods-v59-Steam-Standalone.zip` 并完整解压到可写目录。
-2. 安装 Windows x64 Python 3（含 Tkinter）。运行 `Start-Trainer.cmd`，或在目录中运行 `python trainer.py`。
-3. 正常打开 AC0，进入飞行任务并暂停。在面板选择独立版游戏的 `acz.exe`，然后点击连接。
-4. 连接后可在面板调整功能开关，或打开 `dist/ACZeroMods.ini` 编辑各弹种参数。XAAM 对应游戏中的 XMAA。
+1. 从 Release 下载 `ACZeroMods-v59-Portable.zip` 并完整解压到可写目录。
+2. 正常打开 AC0，进入飞行任务并暂停。
+3. 运行 `ACZeroMods.exe`，点击“连接已启动的 AC0”。EXE 便携包无需安装 Python。
+4. 连接后可在面板调整功能开关，或打开同目录的 `ACZeroMods.ini` 编辑各弹种参数。XAAM 对应游戏中的 XMAA。
 
-面板会核对选定的游戏 EXE、已验证的版本及运行时代码，再通过 Windows 加载器把普通 v59 DLL 加载到该游戏进程。同一进程只加载一次。发布包包含 Python 源码，供检查加载与校验流程。
+面板会核对运行中的游戏 EXE、已验证的版本及运行时代码，再通过 Windows 加载器把普通 v59 DLL 加载到该游戏进程。同一进程只加载一次。EXE 面板源码见 `src/portable_launcher.cpp`，仓库也保留 Python 面板源码。
+
+## 卡巴告警与验证状态
+
+本启动器曾被卡巴报为 `VHO:Trojan-PSW.Win32.Convagent.gen`。代码检查未发现联网、读取浏览器密码或设置开机启动的逻辑。连接 AC0 时使用的 `WriteProcessMemory`、`CreateRemoteThread` 和 `LoadLibraryW` 可能触发启发式检测，具体检测原因尚未由卡巴确认，当前应视为疑似误报。
+
+在用户自行添加本机排除项后，同一份 EXE 已通过离线文件校验、16 项开关的隐藏窗口布局检查、游戏版本检查，以及损坏游戏文件和 DLL 的拒绝测试。EXE 便携包的实际游戏连接仍待验证。排除项允许本机执行，不能作为厂商已确认误报的证明。可通过卡巴官方渠道提交样本复核。[卡巴处理说明](https://support.kaspersky.com/common/error/other/15332)
+
+Release 附有 ZIP 和 EXE 的 SHA256，包内 `SHA256SUMS.txt` 可核对各文件。
 
 ## 功能与检查点
 
@@ -26,6 +34,8 @@
 ## 从源码构建
 
 Windows 上准备 Zig 和 PowerShell，在源码根目录运行 `./build.ps1 -Zig zig`。构建输出到 `dist/ACZeroMods-v59.dll`。启动器用到的游戏兼容性资料仅包含校验所需的版本、偏移和哈希。
+
+原生面板运行 `./build-launcher.ps1 -Zig zig` 构建，输出为 `dist/ACZeroMods.exe`。该构建会绑定当前 `dist/ACZeroMods-v59.dll` 的 SHA256。发行包的原始兼容性资料保存在 `compat/portable_v59_profile.h`。
 
 - [v59 更新记录](CHANGELOG.md)
 - [全机体解锁与购买清单](docs/aircraft-unlocks.md)
