@@ -240,6 +240,146 @@ static void cpValidateMission(const CheckpointNative& s,bool fromDeath){
     }
     cpRequire(mission==s.missionBytes,"Mission phase or script controller changed");
 }
+static void cpLoad(bool fromDeath=false){
+    auto& s=savedCheckpoint;
+    if(!checkpointReady){checkpointResult=-2;return;}
+    if(s.epoch!=checkpointEpoch||s.player!=player||s.plane!=player[0x20a3]){cpInvalidate("checkpoint identity expired");checkpointResult=-3;return;}
+    if(s.dual!=dualOn||s.ammo!=ammoOn||s.reload!=reloadOn){checkpointResult=-7;return;}
+    cpValidateMission(s,fromDeath);
+    checkpoint::Journal journal;unsigned cleared=cpWeapons(s.weapon,s.root,s.manager,true,journal);
+    UP radio=field<UP>(reinterpret_cast<void*>(s.mission),0x308);
+    bool radioRestored=false;
+    for(auto& span:s.restore){
+        if(radio&&span.address==radio+0x90c&&span.bytes.size()==2){
+            auto bytes=cpBytes(span.address,2);
+            bytes[0]=U8((bytes[0]&~4u)|(span.bytes[0]&4u));
+            journal.add(span.address,bytes.data(),bytes.size(),cpRead);radioRestored=true;
+        }else journal.add(span.address,span.bytes.data(),span.bytes.size(),cpRead);
+    }
+    if(fromDeath){
+        for(auto& span:s.deathRestore){
+            auto bytes=span.bytes;
+            // Resume directly from failure. The normal 0xce880 branch will
+            // refresh audio/input pause state on the following frame.
+            if(span.address==s.manager+0xa8790)bytes[0]&=~3u;
+            if(span.address==UP(player)+0x2058)bytes[0]&=~2u;
+            if(span.address==UP(player)+0x1c20)bytes[0]&=~0x40u;
+            journal.add(span.address,bytes.data(),bytes.size(),cpRead);
+        }
+        for(auto range:{std::pair<size_t,size_t>{0x3a8,4},{0x3b8,8},{0x3cc,2}}){
+            auto bytes=checkpoint::Bytes(s.missionBytes.begin()+range.first,s.missionBytes.begin()+range.first+range.second);
+            if(range.first==0x3a8)bytes[0]&=~4u;
+            journal.add(s.mission+range.first,bytes.data(),bytes.size(),cpRead);
+        }
+        // Keep CMenuOver enabled for the next death. Native 0xd3a64..0xd3ac0
+        // draws it only in the failure state; normal flight never dispatches
+        // it. Hiding byte +8 here causes a softlock on the second death.
+    }
+    for(auto& span:journal.writes)cpRequire(cpWritable(span.address,span.bytes.size()),"Unwritable load range");
+    // Native loadout calls run only after complete validation. Retain a separate
+    // old loadout snapshot for failure restoration; core spans have their journal.
+    U8 oldSlot=player[0x279a],oldMode=player[0x2098],oldAmmo=player[0x209a];
+    uint16_t oldCool[4];for(int i=0;i<4;i++)oldCool[i]=field<uint16_t>(player,0x1f40+i*24);
+    int oldCache[3];uint16_t oldDormant[3][4];memcpy(oldCache,ammoCache,sizeof(oldCache));memcpy(oldDormant,cooldownCache,sizeof(oldDormant));
+    try{
+        if(oldSlot!=s.slot)switchSp(player,s.slot);
+        cpRequire(player[0x279a]==s.slot,"Native SP rebuild failed");
+        setWeaponMode(player,s.mode!=0);
+        journal.apply(cpRead,cpWrite);
+    }catch(...){
+        if(player[0x279a]!=oldSlot)switchSp(player,oldSlot);setWeaponMode(player,oldMode!=0);player[0x209a]=oldAmmo;
+        for(int i=0;i<4;i++)field<uint16_t>(player,0x1f40+i*24)=oldCool[i];
+        memcpy(ammoCache,oldCache,sizeof(oldCache));memcpy(cooldownCache,oldDormant,sizeof(oldDormant));throw;
+    }
+    memset(targets,0,sizeof(targets));memset(missiles,0,sizeof(missiles));memset(spSpeedStates,0,sizeof(spSpeedStates));aimTargetCount=0;
+    gunTracking.reset();gunTrackingFrame=frame;gunTrackingEligible=0;gunDeflectionDegrees=0;highGBlend=0.f;highGActive=0;highGSpeedGate.reset();nextReset();
+    checkpointCleared=cleared;++checkpointLoads;checkpointResult=2;
+    if(radioRestored)++checkpointRadioRestores;
+    if(fromDeath)++checkpointDeathLoads;
+}
+static void checkpointService(bool atMissionBoundary){
+    if(checkpointRequest==3&&!atMissionBoundary)return;
+    LONG request=InterlockedExchange(&checkpointRequest,0);if(!request)return;
+    if(!validPlayer(player)||(request!=3&&!(player[0x2058]&2))){checkpointResult=-1;return;}
+    checkpointResult=-4;
+    checkpointUnsupportedWeaponType=checkpointUnsupportedWeaponMask=0;
+    try{if(request==1)cpCapture();else if(request==2||request==3)cpLoad(request==3);}
+    catch(const std::exception& e){log(e.what());}
+    catch(...){checkpointResult=-6;log("Unexpected checkpoint failure");}
+    log(checkpointMessage(checkpointResult.load()));
+}
+using CheckpointMissionUpdate=UP(*)(U8*);
+static CheckpointMissionUpdate originalCheckpointMissionUpdate;
+static void checkpointObserveLifecycle(U8* manager){
+    if(!checkpointReady)return;
+    const auto& s=savedCheckpoint;
+    if(UP(manager)!=s.manager||s.epoch!=checkpointEpoch){cpInvalidate("mission instance changed");return;}
+    if(!readable(manager,0xa882a)||field<UP>(manager,0xa8248)!=UP(s.player)||field<UP>(manager,0xa8318)!=s.owner||
+        !readable(reinterpret_cast<void*>(s.owner),0x24)||field<UP>(reinterpret_cast<void*>(s.owner),0x10)!=s.mission||
+        !validPlayer(s.player)||s.player[0x20a3]!=s.plane||field<UP>(s.player,0x2040)!=s.root||
+        !readable(reinterpret_cast<void*>(s.mission),0x410)){
+        cpInvalidate("mission ownership changed or released");return;
+    }
+    const U8* mission=reinterpret_cast<const U8*>(s.mission);
+    UP definition{},currentDefinition{};memcpy(&definition,s.missionBytes.data()+0x2d8,8);memcpy(&currentDefinition,mission+0x2d8,8);
+    if(currentDefinition!=definition||mission[0x3c9]!=s.missionBytes[0x3c9]||mission[0x3d2]!=s.missionBytes[0x3d2]){
+        cpInvalidate("mission script phase changed");return;
+    }
+    // Native owner+21 bit 0 marks that the last action has completed
+    // (0x12c035). Preserve the failure path 4 -> 5 -> 6 for death Load.
+    if(field<U8>(reinterpret_cast<void*>(s.owner),0x21)&1){cpInvalidate("mission completed");return;}
+    U8 state=mission[0x3cc],mode=manager[0xa8822];
+    if(state<3||state>6){cpInvalidate("left checkpoint flight/failure phase");return;}
+    if(mode==6||(mode!=s.missionMode&&state==3)){cpInvalidate("left mission or entered replay");return;}
+}
+static void checkpointAutoService(U8* manager){
+    if(!checkpointAutoOn){checkpointAuto.reset();return;}
+    // This runs on the same game thread AFTER the complete native mission
+    // update, not on the settings worker or within an actor update.
+    if(!readable(manager,0xa882a)||!validPlayer(player)||
+       field<UP>(manager,0xa8248)!=UP(player)){
+        checkpointAuto.interrupt();return;
+    }
+    UP owner=field<UP>(manager,0xa8318);
+    if(!readable(reinterpret_cast<void*>(owner),0x24)){checkpointAuto.interrupt();return;}
+    UP mission=field<UP>(reinterpret_cast<void*>(owner),0x10);
+    if(!readable(reinterpret_cast<void*>(mission),0x410)){checkpointAuto.interrupt();return;}
+    auto m=reinterpret_cast<U8*>(mission);
+    checkpoint::PhaseKey key{UP(manager),UP(player),field<UP>(player,0x2040),mission,owner,
+        field<UP>(m,0x2d8),checkpointWorldSession,m[0x3c9],m[0x3d2],manager[0xa8822]};
+    bool eligible=m[0x3cc]==3&&m[0x3cd]==3&&key.mode!=6&&
+        !(field<U8>(reinterpret_cast<void*>(owner),0x21)&1)&&
+        !(player[0x2058]&2)&&key.root==field<UP>(m,0x2f8);
+    if(eligible){
+        MemoryReadScope scope;
+        auto read=[](uintptr_t at,void* out,size_t bytes){
+            if(!readable(reinterpret_cast<void*>(at),bytes))return false;
+            memcpy(out,reinterpret_cast<void*>(at),bytes);return true;
+        };
+        bool ready{};key.milestone=checkpointMilestone.sample(read,key.root,key.session,ready);
+        checkpointAutoProfile=checkpointMilestone.pixy?18:0;checkpointAutoMilestone=key.milestone;
+        eligible=ready;
+    }
+    if(!checkpointAuto.due(key,checkpointMissionFrames.load(),eligible,checkpointMilestone.pixy?120:30))return;
+    // The same capture validates all domains and rejects in-flight weapons.
+    // It builds a replacement locally; failed attempts never overwrite a CP.
+    int previous=checkpointResult.load();checkpointResult=-4;
+    ++checkpointAutoAttempts;
+    try{
+        cpCapture();checkpointAuto.committed();++checkpointAutoSaves;checkpointAutoResult=1;
+        char line[192];snprintf(line,sizeof(line),"Automatic checkpoint saved: phase=%u subphase=%u milestone=%u session=%llu spans=%u",
+            key.phase,key.subphase,key.milestone,key.session,checkpointSnapshotSpans.load());log(line);
+    }catch(const std::exception& e){
+        int result=checkpointResult.load();
+        if(checkpointAutoResult.exchange(result)!=result)log(e.what());
+        checkpointResult=previous;
+    }catch(...){checkpointAutoResult=-6;checkpointResult=previous;}
+}
+static UP checkpointMissionUpdateHook(U8* manager){
+    PerfScope timer(Perf::Mission);
+    checkpointObserveLifecycle(manager);
+    UP result=originalCheckpointMissionUpdate(manager);++checkpointMissionFrames;
+    checkpointObserveLifecycle(manager);
     // Service at the outer mission-update boundary, after its cached state and
     // menu decisions are finished. Dead players need not receive player ticks.
     bool restoring=checkpointRequest==3;
