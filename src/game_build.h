@@ -1,0 +1,98 @@
+#pragma once
+// Legacy symbolic RVAs are translated only through individually inspected entries.
+// Isolated legacy fixtures retain their original symbolic layout.
+static size_t gameRva(size_t legacy) {
+#ifdef AC0_CHECKPOINT_TEST
+    return legacy;
+#else
+    switch(legacy) {
+    case 0x904d0:return 0x90510;
+    case 0x90a20:return 0x90a60;
+    case 0x9d9d0:return 0x9da10;
+    case 0x9dae2:return 0x9db22;
+    case 0x9dae7:return 0x9db27;
+    case 0x9dff0:return 0x9e030;
+    case 0x9e46e:return 0x9e4ae;
+    case 0x9e473:return 0x9e4b3;
+    case 0x9f1f0:return 0x9f230;
+    case 0x9f55a:return 0x9f59a;
+    case 0x9f55f:return 0x9f59f;
+    case 0xafd00:return 0xafd40;
+    case 0xb00c0:return 0xb0100;
+    case 0xb056d:return 0xb05ad;
+    case 0xb0572:return 0xb05b2;
+    case 0xb6c10:return 0xb6c50;
+    case 0xb6dc0:return 0xb6e00;
+    case 0xb9a60:return 0xb9aa0;
+    case 0xb9b01:return 0xb9b41;
+    case 0xb9b09:return 0xb9b49;
+    case 0xb9bf9:return 0xb9c39;
+    case 0xb9c02:return 0xb9c42;
+    case 0xb9d80:return 0xb9dc0;
+    case 0xbf770:return 0xbf7b0;
+    case 0xc04e0:return 0xc0520;
+    case 0xc0740:return 0xc0780;
+    case 0xc1030:return 0xc1070;
+    case 0xc10f0:return 0xc1130;
+    case 0xc15d0:return 0xc1610;
+    case 0xc1c20:return 0xc1c60;
+    case 0xc2630:return 0xc2670;
+    case 0xc2680:return 0xc26c0;
+    case 0xc51e0:return 0xc5220;
+    case 0xce880:return 0xce8c0;
+    case 0xd5ab0:return 0xd5af0;
+    case 0xd5d80:return 0xd5dc0;
+    case 0xd5f10:return 0xd5f50;
+    case 0xd93b0:return 0xd93f0;
+    case 0xdd440:return 0xdd480;
+    case 0xddb40:return 0xddb80;
+    case 0xddce0:return 0xddd20;
+    case 0xe9340:return 0xe9380;
+    case 0xeae00:return 0xeae40;
+    case 0xeba10:return 0xeba50;
+    case 0xec6c0:return 0xec700;
+    case 0x1040c0:return 0x104100;
+    case 0x10f560:return 0x10f5a0;
+    case 0x128d90:return 0x128dd0;
+    case 0x12aa30:return 0x12aa70;
+    case 0x12c740:return 0x12c780;
+    case 0x13ace0:return 0x13ad20;
+    case 0x13ef83:return 0x13efc3;
+    case 0x13f1bc:return 0x13f1fc;
+    case 0x13f2e0:return 0x13f320;
+    case 0x13f2e8:return 0x13f328;
+    case 0x158f80:return 0x158fc0;
+    case 0x15e530:return 0x15e570;
+    case 0x187a40:return 0x187a80;
+    case 0x187c80:return 0x187cc0;
+    case 0x187ec0:return 0x187f00;
+    case 0x1c6150:return 0x1c67d0;
+    case 0x1fe080:return 0x1fe700;
+    case 0x202920:return 0x202fa0;
+    case 0x203050:return 0x2036d0;
+    case 0x2ab6b0:return 0x2ad6f0;
+    case 0x2ac4a8:return 0x2ae4e8;
+    case 0x2ac520:return 0x2ae560;
+    case 0x2accc0:return 0x2aed00;
+    case 0x2d2478:return 0x2d46b0;
+    case 0x328418:return 0x32b438;
+    case 0x32c8f0:return 0x32f910;
+    case 0x9af70:return 0x9afb0;
+    case 0x9b6f0:return 0x9b730;
+    case 0x9b6f8:return 0x9b738;
+    case 0x9c450:return 0x9c490;
+    case 0x9c9f3:return 0x9ca33;
+    case 0x9c9fb:return 0x9ca3b;
+    case 0x9d220:return 0x9d260;
+    case 0x9d46a:return 0x9d4aa;
+    case 0x9d46f:return 0x9d4af;
+    case 0x9e950:return 0x9e990;
+    case 0x9edc9:return 0x9ee09;
+    case 0x9edce:return 0x9ee0e;
+    case 0x2d2590:return 0x2d47c8;
+    case 0x2d25c8:return 0x2d4800;
+    default:std::abort(); // Unmapped native access is a developer error.
+    }
+#endif
+}
+static UP gameAddress(size_t legacy){return image+gameRva(legacy);}
